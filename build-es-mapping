@@ -1,0 +1,165 @@
+/*
+ * 只写逻辑,依赖文件不放进来了
+ * */
+
+let $config = Object.assign({}, config.elastic);
+let esClient = new elasticClient($config);
+
+async.waterfall([
+  callback => {
+    esClient._client.indices.exists(
+      { index: $config.index },
+      (err, response) => {
+        callback(err, response);
+      });
+  },
+  (exist, callback) => {
+    if (!exist) {
+      esClient.create(
+        { index: 'impress' },
+        (err, response) => {
+          callback(err, response);
+        });
+    } else {
+      return callback(1, new Error('index Exist'));
+    }
+  },
+  (created, callback) => {
+    esClient._client.indices.close(
+      { index: 'impress' },
+      (err, response) => {
+        callback(err, response);
+      });
+  },
+  (close, callback) => {// settings 之前需将index 状态改为close
+    esClient._client.indices.putSettings({
+      index: 'impress',
+      body: {
+        analysis: {
+          filter: {
+            email: {
+              type: 'pattern_capture',
+              preserve_original: 1,
+              patterns: ['([^@]+)', '(\\p{L}+)', '(\\d+)', '@(.+)', '([^-@]+)']
+            }
+          },
+          analyzer: {
+            email: {
+              tokenizer: 'uax_url_email',
+              filter: ['email', 'lowercase', 'unique']
+            }
+          }
+        }
+      }
+
+    }, (err, response) => {
+      callback(err, response)
+    });
+  },
+  (setting, callback) => {
+    putDefaultMapping((err, response) => {
+      callback(err, response);
+    });
+  },
+  (isSet, callback) => {//重新 开启 index
+    esClient._client.indices.open({ index: 'impress' }, (err, response) => {
+      callback(err, response);
+    });
+  }
+], (err) => {
+  if (err === 1) {
+    return console.log('index document mapping existing');
+  }
+  if (err) {
+    throw err;
+  }
+  console.log("Elasticsearch initialize success~! Cheer~")
+});
+
+function putDefaultMapping (callback) {
+  let photo = {
+    photos: {
+      properties: {
+        name: {
+          type: 'string',
+          analyzer: 'ik',
+          term_vector: 'with_positions_offsets',
+          search_analyzer: 'ik'
+        },
+        tags: {
+          type: 'string',
+          analyzer: 'ik',
+          term_vector: 'with_positions_offsets',
+          search_analyzer: 'ik'
+        },
+        description: {
+          type: 'string',
+          analyzer: 'ik',
+          term_vector: 'with_positions_offsets',
+          search_analyzer: 'ik'
+        }
+      }
+    }
+  };
+
+  let user = {
+    users: {
+      properties: {
+        email: {
+          type: 'string',
+          analyzer: 'email'
+        },
+        username: {
+          type: 'string',
+          analyzer: 'standard'
+        },
+        nickname: {
+          type: 'string',
+          analyzer: 'ik'
+        },
+        description: {
+          type: 'string',
+          analyzer: 'ik',
+          term_vector: 'with_positions_offsets',
+          search_analyzer: 'ik'
+        }
+      }
+    }
+  };
+
+  let album = {
+    albums: {
+      properties: {
+        albumname: {
+          type: 'string',
+          analyzer: 'ik'
+        },
+        description: {
+          type: 'string',
+          analyzer: 'ik',
+          term_vector: 'with_positions_offsets',
+          search_analyzer: 'ik'
+        },
+        created_at: {
+          type: 'string',
+          analyzer: 'ik'
+        }
+      }
+    }
+  };
+
+  async.parallel([
+    function (callback) {
+      esClient.putMapping({ index: $config.index, type: 'photos', body: photo }, callback);
+    },
+    function (callback) {
+      esClient.putMapping({ index: $config.index, type: 'users', body: user }, callback);
+    },
+    function (callback) {
+      esClient.putMapping({ index: $config.index, type: 'albums', body: album }, callback);
+    }
+  ], (err) => {
+    if (err) throw err;
+    callback(err);
+  });
+}
