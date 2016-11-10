@@ -1,0 +1,31 @@
+#!/bin/bash
+# redis cluster 一件安装脚本
+SCRIPT_DIR="$(dirname "$0")"
+REDIS_HOME="$(cd "$SCRIPT_DIR" && pwd)"
+echo $REDIS_HOME
+wget -c https://github.com/antirez/redis/archive/3.2.5.tar.gz -O redis-3.2.5.tar.gz
+tar -xvf redis-3.2.5.tar.gz
+cd redis-3.2.5/src
+make
+
+for INSTANCE in 7000 7001 7002 7003 7004 7005
+do
+  mkdir $REDIS_HOME/$INSTANCE 
+  echo $REDIS_HOME/$INSTANCE 
+  cd $REDIS_HOME/$INSTANCE 
+  cp $REDIS_HOME/redis-3.2.5/src/redis-server $REDIS_HOME/redis-3.2.5/src/redis-trib.rb ./
+  cat>redis.conf<<EOF
+    port 7000
+    cluster-enabled yes
+    cluster-config-file 7001.conf 7002.conf
+    cluster-node-timeout 5000
+    appendonly yes
+EOF
+  rm nodes.conf
+  ./redis-server redis.conf &
+  # INSTANCE=`expr $INSTANCE+1`
+  echo $INSTANCE
+done
+
+# ps aux | grep redis-server | awk '{print $2}'| xargs kill -9
+
